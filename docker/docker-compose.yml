@@ -1,0 +1,168 @@
+services:
+  # =========================
+  # Apache Kafka (official, KRaft single node)
+  # =========================
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: kafka
+    networks: [ iotnet ]
+    ports:
+      - "9092:9092"   # client port (PLAINTEXT) for your local tools/apps
+    environment:
+      # --- KRaft single-node cluster config ---
+      KAFKA_NODE_ID: "1"                             # unique node id (int)
+      KAFKA_PROCESS_ROLES: "broker,controller"       # both roles on this node
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093" # <nodeId>@<host:controllerPort>
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      # --- One-time cluster format on first boot (dev convenience) ---
+      CLUSTER_ID: "abcdefghijklmnopqrstuv"           # 22-char base64-like id
+      # --- Single-node friendly defaults ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"       # we create topics explicitly
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-configs.sh --version >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  # Create required Kafka topics after broker is healthy
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: kafka-init
+    networks: [ iotnet ]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: [ "bash","-lc" ]
+    command:
+      - |
+        set -e
+        echo "Creating topics..."
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+          --create --if-not-exists --topic iot.readings \
+          --partitions 12 --replication-factor 1 \
+          --config cleanup.policy=delete \
+          --config retention.ms=604800000 \
+          --config segment.bytes=134217728
+
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+          --create --if-not-exists --topic iot.readings.dlq \
+          --partitions 6 --replication-factor 1 \
+          --config cleanup.policy=delete \
+          --config retention.ms=1209600000
+
+        echo "Listing topics:"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+        echo "Kafka topics created."
+
+  # =========================
+  # Flink Session Cluster
+  # =========================
+  flink-jobmanager:
+    image: flink:1.19.1-scala_2.12-java17
+    container_name: flink-jobmanager
+    networks: [ iotnet ]
+    ports:
+      - "8081:8081"     # Flink Web UI
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        # Checkpoint/savepoint dirs (local volumes for dev)
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        state.savepoints.dir:  file:///opt/flink/savepoints
+        # Exactly-once checkpointing (dev-friendly interval)
+        execution.checkpointing.interval: 30000
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.unaligned: true
+        # Simple restart strategy for dev
+        restart-strategy: fixed-delay
+        restart-strategy.fixed-delay.attempts: 10
+        restart-strategy.fixed-delay.delay: 5 s
+    command: jobmanager
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_savepoints:/opt/flink/savepoints
+      - ./flink/jars:/jars:ro          # drop your fat-jar here for easy submission
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/overview | grep -q 'taskmanagers'"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+
+  flink-taskmanager:
+    image: flink:1.19.1-scala_2.12-java17
+    container_name: flink-taskmanager
+    networks: [ iotnet ]
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 1024m
+    command: taskmanager
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_savepoints:/opt/flink/savepoints
+
+  # =========================
+  # Cassandra 5 (single node)
+  # =========================
+  cassandra:
+    image: cassandra:5
+    container_name: cassandra
+    networks: [ iotnet ]
+    ports:
+      - "9042:9042"     # CQL
+    environment:
+      CASSANDRA_CLUSTER_NAME: "IotLocal"
+      CASSANDRA_DC: "dc1"
+      CASSANDRA_RACK: "rack1"
+      CASSANDRA_NUM_TOKENS: "8"      # small, ok for dev
+      MAX_HEAP_SIZE: "1G"
+      HEAP_NEWSIZE: "256M"
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+
+  # Initialize keyspace/tables once Cassandra is healthy
+  cassandra-init:
+    image: cassandra:5
+    container_name: cassandra-init
+    networks: [ iotnet ]
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./cassandra/init.cql:/init/init.cql:ro
+    entrypoint: [ "bash","-lc" ]
+    command:
+      - |
+        echo "Applying CQL schema…"
+        cqlsh cassandra -f /init/init.cql
+        echo "Cassandra schema applied."
+
+networks:
+  iotnet:
+
+volumes:
+  kafka_data:
+  cassandra_data:
+  flink_checkpoints:
+  flink_savepoints:
