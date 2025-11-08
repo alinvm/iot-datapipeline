@@ -42,6 +42,7 @@ public class IotAggJob {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(30_000);
+        env.getConfig().setAutoWatermarkInterval(1000L);
 
         var source = KafkaSource.<Reading>builder()
                 .setBootstrapServers(kafkaBootstrap)
@@ -53,7 +54,8 @@ public class IotAggJob {
 
         var wm = WatermarkStrategy
                 .<Reading>forBoundedOutOfOrderness(Duration.ofSeconds(wmLatenessSec))
-                .withTimestampAssigner((r, ts) -> r.timestamp());
+                .withTimestampAssigner((r, ts) -> r.timestamp())
+                .withIdleness(Duration.ofSeconds(10));
 
         var readings = env.fromSource(source, wm, "kafka-readings");
 
@@ -62,11 +64,6 @@ public class IotAggJob {
                     .keyBy(Reading::deviceId)
                     .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
                     .aggregate(new TDigestAggregateFunction(), new Processor1MinuteWindow());
-        minuteAggs
-                .map(r -> "1m " + r.deviceId() + " @" + new java.sql.Timestamp(r.windowStartMs())
-                        + " count=" + r.acc1m().getCount())
-                .returns(org.apache.flink.api.common.typeinfo.Types.STRING)
-                .print();
 
         var hourAggs =
                 readings
