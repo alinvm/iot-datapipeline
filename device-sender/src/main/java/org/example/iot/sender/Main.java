@@ -33,13 +33,14 @@ public class Main {
                 try {
                     long ts = Instant.now().toEpochMilli();
                     double value = 18 + Math.random() * 8;
+                    double valueTruncated = Math.floor(value * 100) / 100;
 
                     Map<String, Object> body = Map.of(
                             "deviceId", deviceId.toString(),
                             "timestamp", ts,
                             "type", "temperature",
                             "unit", "C",
-                            "value", value
+                            "value", valueTruncated
                     );
 
                     String json = objectMapper.writeValueAsString(body);
