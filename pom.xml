@@ -10,6 +10,8 @@
     <packaging>pom</packaging>
     <modules>
         <module>aggregator</module>
+        <module>ingress</module>
+        <module>device-sender</module>
     </modules>
 
     <properties>

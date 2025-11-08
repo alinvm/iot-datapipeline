@@ -78,8 +78,8 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: flink-jobmanager
         # Checkpoint/savepoint dirs (local volumes for dev)
-        state.checkpoints.dir: file:///opt/flink/checkpoints
-        state.savepoints.dir:  file:///opt/flink/savepoints
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
+        state.savepoints.dir:  file:///tmp/flink-savepoints
         # Exactly-once checkpointing (dev-friendly interval)
         execution.checkpointing.interval: 30000
         execution.checkpointing.mode: EXACTLY_ONCE
@@ -90,8 +90,6 @@ services:
         restart-strategy.fixed-delay.delay: 5 s
     command: jobmanager
     volumes:
-      - flink_checkpoints:/opt/flink/checkpoints
-      - flink_savepoints:/opt/flink/savepoints
       - ./flink/jars:/jars:ro          # drop your fat-jar here for easy submission
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/overview | grep -q 'taskmanagers'"]
@@ -113,9 +111,6 @@ services:
         taskmanager.numberOfTaskSlots: 4
         taskmanager.memory.process.size: 1024m
     command: taskmanager
-    volumes:
-      - flink_checkpoints:/opt/flink/checkpoints
-      - flink_savepoints:/opt/flink/savepoints
 
   # =========================
   # Cassandra 5 (single node)
@@ -157,6 +152,32 @@ services:
         echo "Applying CQL schema…"
         cqlsh cassandra -f /init/init.cql
         echo "Cassandra schema applied."
+  # =========================
+  # Java Services
+  # =========================
+  ingress:
+    build:
+      context: ../ingress
+    image: iot-ingress:latest
+    networks: [ iotnet ]
+    ports:
+      - "8082:8082"
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:9092
+      - KAFKA_TOPIC=iot.readings
+    depends_on:
+      kafka:
+        condition: service_healthy
+  device-sender:
+    build:
+      context: ../device-sender
+    image: iot-device-sender:latest
+    environment:
+      DEVICES: 50
+      INGRESS_URL: http://ingress:8082/ingress/readings
+    depends_on:
+      - ingress
+    networks: [ iotnet ]
 
 networks:
   iotnet:
