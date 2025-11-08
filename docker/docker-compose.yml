@@ -73,6 +73,9 @@ services:
     networks: [ iotnet ]
     ports:
       - "8081:8081"     # Flink Web UI
+    depends_on:
+      cassandra-init:
+        condition: service_completed_successfully
     environment:
       - |
         FLINK_PROPERTIES=
@@ -88,7 +91,19 @@ services:
         restart-strategy: fixed-delay
         restart-strategy.fixed-delay.attempts: 10
         restart-strategy.fixed-delay.delay: 5 s
-    command: jobmanager
+    command: >
+      bash -lc '
+        /docker-entrypoint.sh jobmanager &
+        sleep 10;
+        for i in $(seq 1 60); do
+          curl -sf http://localhost:8081/overview && break || sleep 1
+        done
+        flink run -c org.example.iot.agg.IotAggJob /jars/iot-agg-job.jar \
+          --kafka.bootstrap kafka:9092 --kafka.topic iot.readings \
+          --cassandra.host cassandra --cassandra.port 9042 --cassandra.keyspace iot \
+          --wm.lateness.sec 10
+        wait
+      '
     volumes:
       - ./flink/jars:/jars:ro          # drop your fat-jar here for easy submission
     healthcheck:
@@ -178,6 +193,19 @@ services:
     depends_on:
       - ingress
     networks: [ iotnet ]
+  query-service:
+    build:
+      context: ../query-service
+    image: iot-query-service:latest
+    environment:
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_KEYSPACE: iot
+    depends_on:
+      cassandra-init:
+        condition: service_completed_successfully
+    networks: [ iotnet ]
+    ports:
+      - "8083:8083"
 
 networks:
   iotnet:
