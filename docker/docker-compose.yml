@@ -63,7 +63,19 @@ services:
         echo "Listing topics:"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
         echo "Kafka topics created."
-
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    networks: [ iotnet ]
+    ports:
+      - "8085:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_READONLY=false
+    depends_on:
+      kafka:
+        condition: service_healthy
   # =========================
   # Flink Session Cluster
   # =========================
@@ -167,6 +179,19 @@ services:
         echo "Applying CQL schema…"
         cqlsh cassandra -f /init/init.cql
         echo "Cassandra schema applied."
+  cassandra-web:
+    image: ipushc/cassandra-web:latest
+    networks: [ iotnet ]
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    environment:
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_PORT: "9042"
+      HOST_PORT: ":8087"        # tells the app to listen on 8087 in the container
+      HOST: "0.0.0.0"          # ensure it binds to all interfaces
+    ports:
+      - "8087:8087"            # host:container
   # =========================
   # Java Services
   # =========================
