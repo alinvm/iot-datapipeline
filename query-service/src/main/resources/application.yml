@@ -3,3 +3,8 @@ server:
 spring:
   application:
     name: Query Service
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://keycloak:8080/realms/iot/protocol/openid-connect/certs
