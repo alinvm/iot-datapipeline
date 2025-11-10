@@ -26,15 +26,18 @@
 mvn clean package
 
 # Start entire infrastructure + services
-docker compose up -d
+docker compose -f docker/docker-compose.yml up -d
+
+# Shutdown everything
+docker compose -f docker/docker-compose.yml down -v
 ```
 
 ## Local Observability and Resources
 
-- [KafkaUI](http://localhost:8081) : http://localhost:8081
-- [Flink UI](http://localhost:8082) : http://localhost:8082
+- [KafkaUI](http://localhost:8085) : http://localhost:8085
+- [Flink UI](http://localhost:8081) : http://localhost:8081
 - [Cassandra Web UI](http://localhost:8087) : http://localhost:8087
-- [Keycloak](http://localhost:8088) : http://localhost:8088
+- [Keycloak](http://localhost:8088) : http://localhost:8088 (admin / admin)
 - [Query API](http://localhost:8083/query/{deviceId}/1m) : http://localhost:8083/query/{deviceId}/1m
 
 ## System flow

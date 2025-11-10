@@ -59,12 +59,14 @@ public class IotAggJob {
 
         var readings = env.fromSource(source, wm, "kafka-readings");
 
+        // 1m stream
         var minuteAggs =
                 readings
                     .keyBy(Reading::deviceId)
                     .window(TumblingEventTimeWindows.of(Duration.ofMinutes(1)))
                     .aggregate(new TDigestAggregateFunction(), new Processor1MinuteWindow());
 
+        // 1h stream
         var hourAggs =
                 readings
                     .keyBy(Reading::deviceId)
@@ -77,7 +79,7 @@ public class IotAggJob {
                     .keyBy(Record1m::deviceId)
                     .process(new ProcessorAllTime());
 
-        // Map to Tuples for CassandraSink (binds ? by position)
+        // Map to Tuples for CassandraSink
         var oneMinuteTuples =
                 minuteAggs.map(r -> Tuple8.of(
                         r.deviceId(),
@@ -115,7 +117,7 @@ public class IotAggJob {
                 ))
                 .returns(new TypeHint<Tuple6<UUID, Long, Double, Double, Double, ByteBuffer>>() {});
 
-        // ---- Cassandra sinks (official connector)
+        // ---- Cassandra sinks
         CassandraSink.addSink(oneMinuteTuples)
                 .setQuery("INSERT INTO " + keyspace + ".agg_device_1m " +
                         "(device_id, bucket_month, window_start, count, sum, min, max, tdigest) " +
