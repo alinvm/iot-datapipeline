@@ -27,4 +27,40 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <build>
+        <plugins>
+
+            <!-- Copy Flink job JAR after the whole build finishes -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+
+                <executions>
+                    <execution>
+                        <id>copy-flink-job-jar</id>
+                        <phase>package</phase> <!-- runs after all modules are packaged -->
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.basedir}/docker/flink/jars</outputDirectory>
+                            <overwrite>true</overwrite>
+
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/aggregator/target</directory>
+                                    <includes>
+                                        <include>iot-agg-job.jar</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
 </project>
